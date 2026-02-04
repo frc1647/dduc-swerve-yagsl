@@ -92,6 +92,10 @@ public class SwerveSubsystem extends SubsystemBase
   @Override
   public void periodic()
   {
+    // Publish gyro telemetry to SmartDashboard for debugging field-oriented drive
+    edu.wpi.first.wpilibj.smartdashboard.SmartDashboard.putNumber("Swerve/GyroHeadingDegrees", getHeading().getDegrees());
+    edu.wpi.first.wpilibj.smartdashboard.SmartDashboard.putNumber("Swerve/GyroHeadingRadians", getHeading().getRadians());
+    edu.wpi.first.wpilibj.smartdashboard.SmartDashboard.putNumber("Swerve/RawGyroYaw", swerveDrive.getYaw().getDegrees());
   }
 
   @Override
@@ -136,6 +140,15 @@ public class SwerveSubsystem extends SubsystemBase
   {
     return run(() -> Arrays.asList(swerveDrive.getModules())
                            .forEach(it -> it.setAngle(0.0)));
+  }
+
+  /**
+   * Centers all swerve modules to face forward (0 degrees).
+   * Useful for allowing the robot to be rolled off the field when disabled.
+   */
+  public void centerModules()
+  {
+    Arrays.asList(swerveDrive.getModules()).forEach(it -> it.setAngle(0.0));
   }
 
   /**

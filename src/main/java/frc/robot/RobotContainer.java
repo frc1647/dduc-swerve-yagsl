@@ -54,7 +54,7 @@ public class RobotContainer
                                                             .withControllerRotationAxis(driverXbox::getRightX)
                                                             .deadband(OperatorConstants.DEADBAND)
                                                             .scaleTranslation(0.8)
-                                                            .allianceRelativeControl(true);
+                                                            .allianceRelativeControl(false);  // Disabled for simpler testing
 
   /**
    * Clone's the angular velocity input stream and converts it to a fieldRelative input stream.
@@ -76,7 +76,7 @@ public class RobotContainer
                                                                         2))
                                                                     .deadband(OperatorConstants.DEADBAND)
                                                                     .scaleTranslation(0.8)
-                                                                    .allianceRelativeControl(true);
+                                                                    .allianceRelativeControl(false);  // Disabled for simpler testing
   // Derive the heading axis with math!
   SwerveInputStream driveDirectAngleKeyboard     = driveAngularVelocityKeyboard.copy()
                                                                                .withControllerHeadingAxis(() ->
@@ -208,5 +208,10 @@ public class RobotContainer
   public void setMotorBrake(boolean brake)
   {
     drivebase.setMotorBrake(brake);
+  }
+
+  public void centerWheels()
+  {
+    drivebase.centerModules();
   }
 }

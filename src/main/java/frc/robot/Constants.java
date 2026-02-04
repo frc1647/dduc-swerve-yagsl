@@ -55,7 +55,10 @@ public final class Constants
   public static final class LimelightConstants
   {
     // Limelight network name
-    public static final String LIMELIGHT_NAME = "limelight";
+    public static final String LIMELIGHT_NAME = "EyeOfSauron";
+    
+    // Connection detection timeout (seconds)
+    public static final double CONNECTION_TIMEOUT_SECONDS = 3.0;
 
     // Camera mounting position relative to robot center (in meters)
     // Camera is mounted 18 inches in front of center, facing forward

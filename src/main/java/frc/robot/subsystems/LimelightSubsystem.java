@@ -12,7 +12,10 @@ import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants.LimelightConstants;
@@ -30,13 +33,35 @@ public class LimelightSubsystem extends SubsystemBase {
     private int currentTargetId = -1;
     private Pose2d lastKnownRobotPose = new Pose2d();
     private double lastTargetTimestamp = 0;
+    
+    // Connection detection state
+    private boolean isConnected = false;
+    private boolean connectionCheckComplete = false;
+    private double connectionCheckStartTime = 0;
+    private double lastHeartbeat = -1;
+    private boolean cameraStreamStarted = false;
 
     /**
      * Creates a new LimelightSubsystem.
      */
     public LimelightSubsystem() {
         this.limelightName = LimelightConstants.LIMELIGHT_NAME;
+        
+        // Start the connection check timer
+        connectionCheckStartTime = Timer.getFPGATimestamp();
 
+        // Initialize SmartDashboard entries for tag selection
+        SmartDashboard.putNumber("Limelight/PrimaryTagID", 1);
+        SmartDashboard.putNumber("Limelight/SecondaryTagID", -1);  // -1 means no secondary tag
+        SmartDashboard.putString("Limelight/Status", "Checking connection...");
+        SmartDashboard.putBoolean("Limelight/Connected", false);
+    }
+    
+    /**
+     * Initializes the Limelight after connection is confirmed.
+     * Called once when the Limelight is detected as connected.
+     */
+    private void initializeLimelight() {
         // Configure the camera pose relative to robot center
         LimelightHelpers.setCameraPose_RobotSpace(
             limelightName,
@@ -49,33 +74,47 @@ public class LimelightSubsystem extends SubsystemBase {
         );
 
         // Set up the camera stream for the driver station
-        // The Limelight streams video at http://limelight.local:5800
         // This adds it to CameraServer so it appears in Shuffleboard/SmartDashboard
-        try {
-            HttpCamera limelightFeed = new HttpCamera(
-                "Limelight",
-                "http://" + limelightName + ".local:5800/stream.mjpg",
-                HttpCameraKind.kMJPGStreamer
-            );
-            CameraServer.startAutomaticCapture(limelightFeed);
-        } catch (Exception e) {
-            DriverStation.reportWarning("Failed to start Limelight camera feed: " + e.getMessage(), false);
+        // Using IP address format: 10.TE.AM.11 (for team 1647: 10.16.47.11)
+        if (!cameraStreamStarted) {
+            try {
+                // Try both hostname and IP-based URLs for compatibility
+                String streamUrl = "http://10.16.47.11:5800/stream.mjpg";
+                HttpCamera limelightFeed = new HttpCamera(
+                    "limelight",  // Use standard name for DriverStation compatibility
+                    streamUrl,
+                    HttpCameraKind.kMJPGStreamer
+                );
+                CameraServer.startAutomaticCapture(limelightFeed);
+                cameraStreamStarted = true;
+                DriverStation.reportWarning("Limelight '" + limelightName + "' camera stream started at " + streamUrl, false);
+            } catch (Exception e) {
+                DriverStation.reportWarning("Failed to start Limelight camera feed: " + e.getMessage(), false);
+            }
         }
-
-        // Initialize SmartDashboard entries for tag selection
-        SmartDashboard.putNumber("Limelight/PrimaryTagID", 1);
-        SmartDashboard.putNumber("Limelight/SecondaryTagID", -1);  // -1 means no secondary tag
-        SmartDashboard.putString("Limelight/Status", "Initialized");
+        
+        SmartDashboard.putString("Limelight/Status", "Connected");
     }
 
     @Override
     public void periodic() {
+        // Handle connection detection during startup (non-blocking)
+        if (!connectionCheckComplete) {
+            checkConnection();
+            return;  // Don't do anything else until connection check is complete
+        }
+        
+        // If not connected, don't attempt any communication
+        if (!isConnected) {
+            return;
+        }
+        
         // Update target status
         hasTarget = LimelightHelpers.getTV(limelightName);
 
         if (hasTarget) {
             currentTargetId = (int) LimelightHelpers.getFiducialID(limelightName);
-            lastTargetTimestamp = edu.wpi.first.wpilibj.Timer.getFPGATimestamp();
+            lastTargetTimestamp = Timer.getFPGATimestamp();
         }
 
         // Publish telemetry to SmartDashboard
@@ -84,6 +123,43 @@ public class LimelightSubsystem extends SubsystemBase {
         SmartDashboard.putNumber("Limelight/TX", LimelightHelpers.getTX(limelightName));
         SmartDashboard.putNumber("Limelight/TY", LimelightHelpers.getTY(limelightName));
         SmartDashboard.putNumber("Limelight/TA", LimelightHelpers.getTA(limelightName));
+    }
+    
+    /**
+     * Non-blocking connection check. Monitors NetworkTables for Limelight heartbeat.
+     * Called each periodic cycle until connection status is determined.
+     */
+    private void checkConnection() {
+        double currentTime = Timer.getFPGATimestamp();
+        double elapsedTime = currentTime - connectionCheckStartTime;
+        
+        // Check the Limelight's NetworkTable for heartbeat (hb) or latency values
+        NetworkTable limelightTable = NetworkTableInstance.getDefault().getTable(limelightName);
+        double currentHeartbeat = limelightTable.getEntry("hb").getDouble(-1);
+        double latency = limelightTable.getEntry("tl").getDouble(-1);
+        
+        // If we see a valid heartbeat or latency value, the Limelight is connected
+        if (currentHeartbeat >= 0 || latency >= 0) {
+            // Check if heartbeat is changing (indicates active communication)
+            if (currentHeartbeat != lastHeartbeat || latency >= 0) {
+                isConnected = true;
+                connectionCheckComplete = true;
+                SmartDashboard.putBoolean("Limelight/Connected", true);
+                initializeLimelight();
+                return;
+            }
+        }
+        lastHeartbeat = currentHeartbeat;
+        
+        // Check if timeout has elapsed
+        if (elapsedTime >= LimelightConstants.CONNECTION_TIMEOUT_SECONDS) {
+            isConnected = false;
+            connectionCheckComplete = true;
+            SmartDashboard.putBoolean("Limelight/Connected", false);
+            SmartDashboard.putString("Limelight/Status", "Not connected - disabled");
+            DriverStation.reportWarning("Limelight '" + limelightName + "' not detected after " + 
+                LimelightConstants.CONNECTION_TIMEOUT_SECONDS + " seconds. Limelight features disabled.", false);
+        }
     }
 
     /**
@@ -103,20 +179,28 @@ public class LimelightSubsystem extends SubsystemBase {
     }
 
     /**
+     * Checks if the Limelight is connected and available.
+     * @return true if the Limelight is connected
+     */
+    public boolean isConnected() {
+        return isConnected;
+    }
+
+    /**
      * Checks if the Limelight currently sees a valid target.
-     * @return true if a target is visible
+     * @return true if a target is visible (and Limelight is connected)
      */
     public boolean hasTarget() {
-        return hasTarget;
+        return isConnected && hasTarget;
     }
 
     /**
      * Checks if a specific AprilTag is currently visible.
      * @param tagId The tag ID to check for
-     * @return true if the specified tag is visible
+     * @return true if the specified tag is visible (and Limelight is connected)
      */
     public boolean canSeeTag(int tagId) {
-        if (!hasTarget) {
+        if (!isConnected || !hasTarget) {
             return false;
         }
 
@@ -254,6 +338,7 @@ public class LimelightSubsystem extends SubsystemBase {
      * @param tagId The AprilTag ID to prioritize
      */
     public void setPriorityTag(int tagId) {
+        if (!isConnected) return;
         LimelightHelpers.setPriorityTagID(limelightName, tagId);
     }
 
@@ -262,6 +347,7 @@ public class LimelightSubsystem extends SubsystemBase {
      * @param tagIds Array of valid tag IDs
      */
     public void setValidTagIds(int[] tagIds) {
+        if (!isConnected) return;
         LimelightHelpers.SetFiducialIDFiltersOverride(limelightName, tagIds);
     }
 
@@ -271,6 +357,7 @@ public class LimelightSubsystem extends SubsystemBase {
      * @param yawDegrees Robot yaw in degrees (0 = facing red alliance wall)
      */
     public void updateRobotOrientation(double yawDegrees) {
+        if (!isConnected) return;
         LimelightHelpers.SetRobotOrientation(limelightName, yawDegrees, 0, 0, 0, 0, 0);
     }
 
@@ -279,6 +366,7 @@ public class LimelightSubsystem extends SubsystemBase {
      * @param index Pipeline index (0-9)
      */
     public void setPipeline(int index) {
+        if (!isConnected) return;
         LimelightHelpers.setPipelineIndex(limelightName, index);
     }
 
@@ -286,6 +374,7 @@ public class LimelightSubsystem extends SubsystemBase {
      * Turns the LEDs on.
      */
     public void setLEDsOn() {
+        if (!isConnected) return;
         LimelightHelpers.setLEDMode_ForceOn(limelightName);
     }
 
@@ -293,6 +382,7 @@ public class LimelightSubsystem extends SubsystemBase {
      * Turns the LEDs off.
      */
     public void setLEDsOff() {
+        if (!isConnected) return;
         LimelightHelpers.setLEDMode_ForceOff(limelightName);
     }
 
@@ -300,6 +390,7 @@ public class LimelightSubsystem extends SubsystemBase {
      * Sets LEDs to be controlled by the pipeline.
      */
     public void setLEDsPipelineControl() {
+        if (!isConnected) return;
         LimelightHelpers.setLEDMode_PipelineControl(limelightName);
     }
 

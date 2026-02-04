@@ -88,6 +88,8 @@ public class Robot extends TimedRobot
   {
     if (disabledTimer.hasElapsed(Constants.DrivebaseConstants.WHEEL_LOCK_TIME))
     {
+      // Center wheels first while still in brake mode, then switch to coast
+      m_robotContainer.centerWheels();
       m_robotContainer.setMotorBrake(false);
       disabledTimer.stop();
       disabledTimer.reset();
@@ -124,6 +126,7 @@ public class Robot extends TimedRobot
   @Override
   public void teleopInit()
   {
+    m_robotContainer.setMotorBrake(true);
     // This makes sure that the autonomous stops running when
     // teleop starts running. If you want the autonomous to
     // continue until interrupted by another command, remove
