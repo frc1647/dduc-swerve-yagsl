@@ -17,12 +17,14 @@ import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.button.CommandPS5Controller;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 import frc.robot.Constants.OperatorConstants;
 import frc.robot.commands.DriveToAprilTagCommand;
 import frc.robot.subsystems.LimelightSubsystem;
+import frc.robot.subsystems.TurretSubsystem;
 import frc.robot.subsystems.swervedrive.SwerveSubsystem;
 import java.io.File;
 import swervelib.SwerveInputStream;
@@ -36,11 +38,14 @@ public class RobotContainer
 {
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
-  final         CommandXboxController driverXbox = new CommandXboxController(0);
+  final         CommandXboxController driverXbox   = new CommandXboxController(0);
+  // Operator controller for turret (PS5 on port 1)
+  final         CommandPS5Controller  operatorPS5  = new CommandPS5Controller(1);
   // The robot's subsystems and commands are defined here...
-  private final SwerveSubsystem       drivebase  = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(),
-                                                                                "swerve/neo"));
-  private final LimelightSubsystem    limelight  = new LimelightSubsystem();
+  private final SwerveSubsystem       drivebase    = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(),
+                                                                                  "swerve/neo"));
+  private final LimelightSubsystem    limelight    = new LimelightSubsystem();
+  private final TurretSubsystem       turret       = new TurretSubsystem();
 
   // Establish a Sendable Chooser that will be able to be sent to the SmartDashboard, allowing selection of desired auto
   private final SendableChooser<Command> autoChooser = new SendableChooser<>();
@@ -192,6 +197,38 @@ public class RobotContainer
       driverXbox.y().whileTrue(new DriveToAprilTagCommand(drivebase, limelight));
     }
 
+    // ── Operator turret controls (PS5 controller on port 1) ────────────────
+    // Left stick X: proportional turret adjustment while held
+    turret.setDefaultCommand(
+        Commands.run(() -> {
+          double stickX = operatorPS5.getLeftX();
+          if (Math.abs(stickX) > TurretSubsystem.JOYSTICK_DEADBAND)
+          {
+            double deltaDeg = stickX * TurretSubsystem.MAX_SPEED_DEG_PER_SEC / 50.0;
+            turret.adjustAngleDegrees(deltaDeg);
+          }
+        }, turret)
+    );
+
+    // D-pad left: nudge turret left
+    operatorPS5.povLeft().whileTrue(
+        Commands.run(() -> turret.adjustAngleDegrees(-TurretSubsystem.BUTTON_SPEED_DEG_PER_TICK), turret)
+    );
+
+    // D-pad right: nudge turret right
+    operatorPS5.povRight().whileTrue(
+        Commands.run(() -> turret.adjustAngleDegrees(TurretSubsystem.BUTTON_SPEED_DEG_PER_TICK), turret)
+    );
+
+    // D-pad down: center turret to 0°
+    operatorPS5.povDown().onTrue(
+        Commands.runOnce(turret::centerTurret, turret)
+    );
+
+    // Circle: emergency stop
+    operatorPS5.circle().onTrue(
+        Commands.runOnce(turret::stop, turret)
+    );
   }
 
   /**
