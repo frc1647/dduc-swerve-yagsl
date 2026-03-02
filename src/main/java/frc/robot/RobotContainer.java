@@ -74,6 +74,9 @@ public class RobotContainer
   SwerveInputStream driveRobotOriented = driveAngularVelocity.copy().robotRelative(true)
                                                              .allianceRelativeControl(false);
 
+  // Tracks whether the robot is in field-oriented (true) or robot-relative (false) mode.
+  private boolean fieldOrientedMode = true;
+
   SwerveInputStream driveAngularVelocityKeyboard = SwerveInputStream.of(drivebase.getSwerveDrive(),
                                                                         () -> -driverXbox.getLeftY(),
                                                                         () -> -driverXbox.getLeftX())
@@ -139,6 +142,9 @@ public class RobotContainer
     Command driveFieldOrientedDirectAngle      = drivebase.driveFieldOriented(driveDirectAngle);
     Command driveFieldOrientedAnglularVelocity = drivebase.driveFieldOriented(driveAngularVelocity);
     Command driveRobotOrientedAngularVelocity  = drivebase.driveFieldOriented(driveRobotOriented);
+
+    // Trigger that is active while field-oriented mode is enabled.
+    Trigger fieldOrientedTrigger = new Trigger(() -> fieldOrientedMode);
     Command driveFieldOrientedDirectAngleKeyboard      = drivebase.driveFieldOriented(driveDirectAngleKeyboard);
     Command driveFieldOrientedAnglularVelocityKeyboard = drivebase.driveFieldOriented(driveAngularVelocityKeyboard);
 
@@ -191,6 +197,16 @@ public class RobotContainer
       driverXbox.back().whileTrue(Commands.none());
       driverXbox.leftBumper().whileTrue(Commands.runOnce(drivebase::lock, drivebase).repeatedly());
       driverXbox.rightBumper().onTrue(Commands.none());
+
+      // B button: Reset field orientation so the robot's current heading becomes "forward".
+      driverXbox.b().onTrue(Commands.runOnce(drivebase::zeroGyro));
+
+      // X button: Toggle between field-oriented and robot-relative drive.
+      driverXbox.x().onTrue(Commands.runOnce(() -> fieldOrientedMode = !fieldOrientedMode));
+
+      // Switch default command based on orientation mode toggle.
+      fieldOrientedTrigger.onTrue(Commands.runOnce(() -> drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocity)));
+      fieldOrientedTrigger.onFalse(Commands.runOnce(() -> drivebase.setDefaultCommand(driveRobotOrientedAngularVelocity)));
 
       // Y button: Drive to AprilTag
       // Press Y to drive to 10 feet in front of the AprilTag specified in SmartDashboard
